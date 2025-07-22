@@ -1,7 +1,8 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "demo",
   "private": true,
   "version": "0.0.0",
+  "description": "A demo application for nearby food trucks, taxis, and trucks",
   "type": "module",
   "scripts": {
     "dev": "vite",
