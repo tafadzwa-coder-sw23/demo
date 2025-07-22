@@ -139,37 +139,91 @@ const mockData = {
 
 const categories = ["Food", "Taxi", "Truck"];
 
-const MapBackground = () => {
+const categoryStyles = {
+  Food: {
+    color: "bg-blue-100 text-blue-700",
+    icon: <Utensils size={18} className="inline-block mr-1" />,
+    action: "Order Now",
+  },
+  Taxi: {
+    color: "bg-green-100 text-green-700",
+    icon: <Car size={18} className="inline-block mr-1" />,
+    action: "Book Taxi",
+  },
+  Truck: {
+    color: "bg-purple-100 text-purple-700",
+    icon: <TruckIcon size={18} className="inline-block mr-1" />,
+    action: "Book Truck",
+  },
+};
+
+const MapBackground = ({ userLocation, onPinClick }) => {
+  const [hoveredPin, setHoveredPin] = React.useState(null);
+
+  // Helper to convert lat/lng to % for positioning on the map div
+  // Using approximate bounding box for Harare area for scaling
+  const latMin = -17.83;
+  const latMax = -17.82;
+  const lngMin = 31.025;
+  const lngMax = 31.035;
+
+  const latRange = latMax - latMin;
+  const lngRange = lngMax - lngMin;
+
+  // Combine all items from all categories for pins, adding category property explicitly
+  const allItems = [
+    ...mockData.Food.map(item => ({ ...item, category: "Food" })),
+    ...mockData.Taxi.map(item => ({ ...item, category: "Taxi" })),
+    ...mockData.Truck.map(item => ({ ...item, category: "Truck" })),
+  ];
+
   return (
     <div className="absolute inset-0 bg-gray-100 dark:bg-gray-900">
       {/* Simulate map grid */}
       {[...Array(20)].map((_, i) => (
         <div
-          key={i}
+          key={`vline-${i}`}
           className="absolute h-full w-1 bg-gray-200 dark:bg-gray-800"
-          style={{ left: `${i * 5}%` }}
+          style={{ left: `${(i * 5)}%` }}
         />
       ))}
       {[...Array(20)].map((_, i) => (
         <div
-          key={i}
+          key={`hline-${i}`}
           className="absolute w-full h-1 bg-gray-200 dark:bg-gray-800"
-          style={{ top: `${i * 5}%` }}
+          style={{ top: `${(i * 5)}%` }}
         />
       ))}
-      
-      {/* Simulate map markers */}
-      {mockData[categories[0]].map((item, idx) => (
-        <div
-          key={item.id}
-          className="absolute w-4 h-4 rounded-full bg-red-500 dark:bg-red-400 shadow-lg cursor-pointer"
-          style={{
-            left: `${(item.lng + 17.8252) * 100}%`,
-            top: `${(item.lat - 31.0264) * 100}%`,
-          }}
-          onClick={() => console.log(item)}
-        />
-      ))}
+
+      {/* Map markers for all categories */}
+      {allItems.map((item) => {
+        // Calculate position as percentage within bounding box
+        const leftPercent = ((item.lng - lngMin) / lngRange) * 100;
+        const topPercent = ((item.lat - latMin) / latRange) * 100;
+
+        const isHovered = hoveredPin && hoveredPin.id === item.id && hoveredPin.category === item.category;
+
+        return (
+          <div
+            key={`${item.category}-${item.id}`}
+            className={`absolute rounded-full shadow-lg cursor-pointer transition-transform ${
+              isHovered ? "scale-125 z-10" : ""
+            } ${
+              categoryStyles[item.category]?.color.replace("bg-", "bg-opacity-75 ") || "bg-gray-500"
+            }`}
+            style={{
+              left: `${leftPercent}%`,
+              top: `${100 - topPercent}%`, // invert top for correct map orientation
+              width: "16px",
+              height: "16px",
+            }}
+            onClick={() => onPinClick(item)}
+            onMouseEnter={() => setHoveredPin(item)}
+            onMouseLeave={() => setHoveredPin(null)}
+            title={`${item.name} (${item.category})`}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -238,34 +292,49 @@ export default function NearbySearch() {
     return Math.round(R * c * 10) / 10;
   }
 
-  // When userLocation is set, recalculate distances
+  // When userLocation is set, recalculate distances for all categories
   const resultsWithDistance = useMemo(() => {
-    if (!userLocation) return mockData[selectedCategory];
-    return mockData[selectedCategory].map((item) => ({
-      ...item,
-      distance: calcDistance(userLocation.lat, userLocation.lng, item.lat, item.lng),
-    }));
-  }, [selectedCategory, userLocation]);
+    if (!userLocation) return mockData;
+    const updated = {};
+    categories.forEach((category) => {
+      updated[category] = mockData[category].map((item) => ({
+        ...item,
+        distance: calcDistance(userLocation.lat, userLocation.lng, item.lat, item.lng),
+        category,
+      }));
+    });
+    return updated;
+  }, [userLocation]);
 
+  // Filtered and sorted items per category
   const filteredItems = useMemo(() => {
-    let results = resultsWithDistance
-      .filter((item) => (showOnlyFavorites ? favorites.includes(item.id) : true))
-      .filter((item) => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
-      .filter((item) => item.distance < distanceFilter)
-      .filter((item) => item.rating >= minRating);
-    // Sorting
-    if (sortBy === "distance-asc") results = results.sort((a, b) => a.distance - b.distance);
-    if (sortBy === "distance-desc") results = results.sort((a, b) => b.distance - a.distance);
-    if (sortBy === "rating-desc") results = results.sort((a, b) => b.rating - a.rating);
-    if (sortBy === "rating-asc") results = results.sort((a, b) => a.rating - b.rating);
-    if (sortBy === "price-asc") results = results.sort((a, b) => (a.price.length - b.price.length));
-    if (sortBy === "price-desc") results = results.sort((a, b) => (b.price.length - a.price.length));
-    return results;
+    const filtered = {};
+    categories.forEach((category) => {
+      let results = resultsWithDistance[category] || [];
+      results = results
+        .filter((item) => (showOnlyFavorites ? favorites.includes(item.id) : true))
+        .filter((item) => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        .filter((item) => item.distance < distanceFilter)
+        .filter((item) => item.rating >= minRating);
+      // Sorting
+      if (sortBy === "distance-asc") results = results.sort((a, b) => a.distance - b.distance);
+      if (sortBy === "distance-desc") results = results.sort((a, b) => b.distance - a.distance);
+      if (sortBy === "rating-desc") results = results.sort((a, b) => b.rating - a.rating);
+      if (sortBy === "rating-asc") results = results.sort((a, b) => a.rating - b.rating);
+      if (sortBy === "price-asc") results = results.sort((a, b) => (a.price.length - b.price.length));
+      if (sortBy === "price-desc") results = results.sort((a, b) => (b.price.length - a.price.length));
+      filtered[category] = results;
+    });
+    return filtered;
   }, [resultsWithDistance, searchTerm, distanceFilter, minRating, sortBy, favorites, showOnlyFavorites]);
 
-  const paginatedResults = useMemo(() => {
-    return filteredItems.slice(0, visibleCount);
-  }, [filteredItems, visibleCount]);
+  // Pagination per category
+  const visibleCountPerCategory = 6;
+
+  const paginatedItems = {};
+  categories.forEach((category) => {
+    paginatedItems[category] = filteredItems[category]?.slice(0, visibleCountPerCategory) || [];
+  });
 
   const handleItemClick = (item) => {
     setSelectedItem(item);
@@ -289,25 +358,6 @@ export default function NearbySearch() {
   const handleSuggestionClick = (suggestion) => {
     setSearchTerm(suggestion.name);
     setShowSuggestions(false);
-  };
-
-  // Category color/icon helpers
-  const categoryStyles = {
-    Food: {
-      color: "bg-blue-100 text-blue-700",
-      icon: <Utensils size={18} className="inline-block mr-1" />,
-      action: "Order Now",
-    },
-    Taxi: {
-      color: "bg-green-100 text-green-700",
-      icon: <Car size={18} className="inline-block mr-1" />,
-      action: "Book Taxi",
-    },
-    Truck: {
-      color: "bg-purple-100 text-purple-700",
-      icon: <TruckIcon size={18} className="inline-block mr-1" />,
-      action: "Book Truck",
-    },
   };
 
   return (
@@ -372,11 +422,18 @@ export default function NearbySearch() {
         </div>
       </div>
 
-      {/* Map Background */}
-      <MapBackground />
-      
+      {/* Map Section */}
+      <section className="container mx-auto px-4 pt-24 relative z-10 h-96 w-full">
+        <div className="relative h-full w-full rounded-lg overflow-hidden shadow-lg">
+          <MapBackground
+            userLocation={userLocation}
+            onPinClick={handleItemClick}
+          />
+        </div>
+      </section>
+
       {/* Content */}
-      <div className="container mx-auto px-4 pt-24 relative z-10">
+      <div className="container mx-auto px-4 pt-6 relative z-10">
         {/* Category Tabs */}
         <div className="mb-6">
           <div className="flex space-x-4 border-b border-gray-200 dark:border-gray-700">
@@ -441,80 +498,84 @@ export default function NearbySearch() {
           </select>
         </div>
 
-        {/* Results */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {paginatedResults.map((item) => (
-            <div
-              key={item.id}
-              className="bg-white dark:bg-gray-800 rounded-xl shadow-md hover:shadow-lg transition-shadow"
-            >
-              <img
-                src={item.image}
-                alt={item.name}
-                className="w-full h-48 object-cover rounded-t-xl"
-              />
-              <div className="p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{item.name}</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">{item.desc}</p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="flex items-center">
-                      <Star className="w-4 h-4 text-yellow-400" />
-                      <span className="text-sm text-gray-600 dark:text-gray-300">{item.rating}</span>
+        {/* Results grouped by category */}
+        {categories.map((category) => (
+          <div key={category} className="mb-10">
+            <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">
+              Close by {category}s
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {paginatedItems[category].map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-white dark:bg-gray-800 rounded-xl shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => handleItemClick(item)}
+                >
+                  <img
+                    src={item.image}
+                    alt={item.name}
+                    className="w-full h-48 object-cover rounded-t-xl"
+                  />
+                  <div className="p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          {categoryStyles[category]?.icon}
+                          <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{item.name}</h3>
+                        </div>
+                        <p className="text-sm text-gray-600 dark:text-gray-300">{item.desc}</p>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="flex items-center">
+                          <Star className="w-4 h-4 text-yellow-400" />
+                          <span className="text-sm text-gray-600 dark:text-gray-300">{item.rating}</span>
+                        </div>
+                        <span className="text-sm text-gray-600 dark:text-gray-300">{item.distance} miles</span>
+                      </div>
                     </div>
-                    <span className="text-sm text-gray-600 dark:text-gray-300">{item.distance} miles</span>
+                    <div className="flex items-center justify-between mt-4">
+                      <div className="flex items-center space-x-2">
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs ${
+                            item.badges.includes("Popular")
+                              ? "bg-blue-100 text-blue-800"
+                              : item.badges.includes("New")
+                              ? "bg-green-100 text-green-800"
+                              : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {item.badges[0]}
+                        </span>
+                        <span className="text-sm text-gray-600 dark:text-gray-300">{item.price}</span>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(item.id);
+                        }}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                      >
+                        {favorites.includes(item.id) ? "Unfavorite" : "Favorite"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between mt-4">
-                  <div className="flex items-center space-x-2">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs ${
-                        item.badges.includes("Popular")
-                          ? "bg-blue-100 text-blue-800"
-                          : item.badges.includes("New")
-                          ? "bg-green-100 text-green-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}
-                    >
-                      {item.badges[0]}
-                    </span>
-                    <span className="text-sm text-gray-600 dark:text-gray-300">{item.price}</span>
-                  </div>
-                  <button
-                    onClick={() => setSelectedItem(item)}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                  >
-                    View Details
-                  </button>
-                </div>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
-
-        {/* Load More Button */}
-        {filteredItems.length > visibleCount && (
-          <div className="mt-8 text-center">
-            <button
-              onClick={() => setVisibleCount((prev) => prev + 6)}
-              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              Load More
-            </button>
           </div>
-        )}
+        ))}
+
       </div>
 
       {/* Modal */}
       {selectedItem && (
         <Modal
           isOpen={!!selectedItem}
-          onClose={() => setSelectedItem(null)}
-          title={selectedItem.name}
+          onClose={handleCloseModal}
+          darkMode={darkMode}
         >
           <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{selectedItem.name}</h3>
             <img
               src={selectedItem.image}
               alt={selectedItem.name}
@@ -534,7 +595,7 @@ export default function NearbySearch() {
             <div className="space-y-2">
               <button
                 onClick={() => {
-                  setFavorites((prev) => [...prev, selectedItem]);
+                  setFavorites((prev) => [...prev, selectedItem.id]);
                   setSelectedItem(null);
                 }}
                 className="w-full px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors"
@@ -559,9 +620,10 @@ export default function NearbySearch() {
       <Modal
         isOpen={showOnboarding}
         onClose={() => setShowOnboarding(false)}
-        title="Welcome to Nearby Services"
+        darkMode={darkMode}
       >
         <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Welcome to Nearby Services</h3>
           <p className="text-gray-600 dark:text-gray-300">
             Find nearby food trucks, taxis, and trucks with ease. Use the filters to find what you need!
           </p>
